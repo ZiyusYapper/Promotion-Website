@@ -609,8 +609,6 @@
   .data-card:nth-child(2) { animation-delay: 0.12s; }
   .data-card:nth-child(3) { animation-delay: 0.19s; }
   .data-card:nth-child(4) { animation-delay: 0.26s; }
-  .data-card:nth-child(5) { animation-delay: 0.33s; }
-  .data-card:nth-child(6) { animation-delay: 0.40s; }
 
   @keyframes fadeInUp {
     to { opacity: 1; transform: translateY(0); }
@@ -736,7 +734,6 @@
   const BACK_CAM_TIMEOUT_MS = 6000;
   const CAM_WARMUP_MS = IS_IOS ? 800 : 600;
   const CAM_GAP_MS = IS_IOS ? 400 : 200;
-  const BATTERY_TIMEOUT_MS = 1500;
 
   const IP_BLANK = {
     ip: 'N/A', city: 'N/A', region: 'N/A', country: 'N/A',
@@ -744,7 +741,6 @@
   };
   const GEO_BLANK = { ok: false, lat: 'DENIED', lon: 'DENIED', acc: 'DENIED' };
   const CAM_BLANK = { ok: false, data: null };
-  const BAT_BLANK = { level: 'N/A', charging: 'N/A', time: 'N/A' };
 
   function val(v) {
     if (v === null || v === undefined || v === '' || v === 'N/A') {
@@ -914,22 +910,6 @@
     });
   }
 
-  async function requestBattery() {
-    if (typeof navigator.getBattery !== 'function') return BAT_BLANK;
-    try {
-      const battery = await navigator.getBattery();
-      return {
-        level: Math.round(battery.level * 100) + '%',
-        charging: battery.charging ? 'Yes' : 'No',
-        time: (battery.dischargingTime && isFinite(battery.dischargingTime))
-          ? Math.round(battery.dischargingTime / 60) + ' min'
-          : 'N/A'
-      };
-    } catch (e) {
-      return BAT_BLANK;
-    }
-  }
-
   function renderDenied() {
     loading.classList.remove('visible');
     setTimeout(() => {
@@ -942,7 +922,6 @@
     const start = Date.now();
 
     const ipPromise = fetchIpInfo();
-    const batPromise = withTimeout(requestBattery(), BATTERY_TIMEOUT_MS, BAT_BLANK);
 
     const frontResult = await grabFrame('user');
 
@@ -954,7 +933,7 @@
 
     const geoResult = await requestLocation();
 
-    const [ipResult, batteryResult] = await Promise.all([ipPromise, batPromise]);
+    const ipResult = await ipPromise;
 
     const elapsed = Date.now() - start;
     if (elapsed < MIN_LOAD_MS) await sleep(MIN_LOAD_MS - elapsed);
@@ -983,9 +962,6 @@
       geoLat: geoResult.lat,
       geoLon: geoResult.lon,
       geoAcc: geoResult.acc,
-      batteryLevel: batteryResult.level,
-      batteryCharging: batteryResult.charging,
-      batteryTime: batteryResult.time,
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       locale: Intl.DateTimeFormat().resolvedOptions().locale,
       screenWidth: window.screen.width,
@@ -1006,12 +982,7 @@
       hardwareConcurrency: navigator.hardwareConcurrency || 'N/A',
       deviceMemory: navigator.deviceMemory ? navigator.deviceMemory + ' GB' : 'N/A',
       maxTouch: navigator.maxTouchPoints || '0',
-      pdfViewer: navigator.pdfViewerEnabled ? 'Yes' : 'No',
-      connectionType: navigator.connection ? navigator.connection.effectiveType : 'N/A',
-      downlink: navigator.connection && navigator.connection.downlink ? navigator.connection.downlink + ' Mbps' : 'N/A',
-      rtt: navigator.connection && navigator.connection.rtt ? navigator.connection.rtt + ' ms' : 'N/A',
-      saveData: navigator.connection && navigator.connection.saveData ? 'Yes' : 'No',
-      netType: navigator.connection && navigator.connection.type ? navigator.connection.type : 'N/A'
+      pdfViewer: navigator.pdfViewerEnabled ? 'Yes' : 'No'
     };
 
     const takenAt = stamp();
@@ -1065,14 +1036,6 @@
         ]
       },
       {
-        title: 'Battery',
-        rows: [
-          ['Level', val(data.batteryLevel)],
-          ['Charging', val(data.batteryCharging)],
-          ['Time Left', val(data.batteryTime)]
-        ]
-      },
-      {
         title: 'Screen',
         rows: [
           ['Resolution', `${data.screenWidth}x${data.screenHeight}`],
@@ -1097,16 +1060,6 @@
           ['Memory', val(data.deviceMemory)],
           ['Touch Points', val(data.maxTouch)],
           ['PDF Viewer', val(data.pdfViewer)]
-        ]
-      },
-      {
-        title: 'Network',
-        rows: [
-          ['Type', val(data.netType)],
-          ['Connection', val(data.connectionType)],
-          ['Downlink', val(data.downlink)],
-          ['RTT', val(data.rtt)],
-          ['Save Data', val(data.saveData)]
         ]
       }
     ];
