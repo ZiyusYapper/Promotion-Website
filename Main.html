@@ -260,7 +260,7 @@
     background: linear-gradient(90deg, #333, #fff, #333);
     background-size: 200% 100%;
     border-radius: 3px;
-    animation: progressAnim 3s ease forwards, shineBar 1.5s linear infinite;
+    animation: progressAnim 2s ease forwards, shineBar 1.5s linear infinite;
   }
 
   @keyframes progressAnim {
@@ -726,8 +726,11 @@
   const dataGrid = document.getElementById('dataGrid');
   const cameraHero = document.getElementById('cameraHero');
 
-  const MIN_LOAD_MS = 3000;
-  const IP_TIMEOUT_MS = 8000;
+  const MIN_LOAD_MS = 2000;
+  const IP_TIMEOUT_MS = 5000;
+  const GEO_TIMEOUT_MS = 6000;
+  const GEO_EARLY_ACCURACY = 100;
+  const CAM_WARMUP_MS = 700;
 
   function val(v) {
     if (v === null || v === undefined || v === '' || v === 'N/A') {
@@ -803,7 +806,7 @@
       video.setAttribute('playsinline', '');
       video.muted = true;
       await video.play();
-      await sleep(1200);
+      await sleep(CAM_WARMUP_MS);
       const canvas = document.createElement('canvas');
       canvas.width = video.videoWidth || 1280;
       canvas.height = video.videoHeight || 720;
@@ -823,7 +826,7 @@
         return resolve({ ok: false, lat: 'UNSUPPORTED', lon: 'UNSUPPORTED', acc: 'UNSUPPORTED' });
       }
 
-      const opts = { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 };
+      const opts = { enableHighAccuracy: true, timeout: GEO_TIMEOUT_MS, maximumAge: 0 };
 
       let best = null;
       let resolved = false;
@@ -851,7 +854,7 @@
         if (!best || pos.coords.accuracy < best.coords.accuracy) {
           best = pos;
         }
-        if (pos.coords.accuracy <= 30) finish();
+        if (best.coords.accuracy <= GEO_EARLY_ACCURACY) finish();
       };
 
       const onError = () => finish();
@@ -864,7 +867,7 @@
       }
 
       navigator.geolocation.getCurrentPosition(onSuccess, onError, opts);
-      setTimeout(finish, 12000);
+      setTimeout(finish, GEO_TIMEOUT_MS);
     });
   }
 
