@@ -149,7 +149,7 @@
     inset: 0;
     background: radial-gradient(circle at center, rgba(255,255,255,0.55) 0%, transparent 60%);
     pointer-events: none;
-    z-index: 9;
+    z-index: 100;
     opacity: 0;
     animation: flashOut 0.8s ease forwards;
   }
@@ -726,13 +726,16 @@
   const dataGrid = document.getElementById('dataGrid');
   const cameraHero = document.getElementById('cameraHero');
 
+  const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+                 (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
   const MIN_LOAD_MS = 2000;
-  const GLOBAL_DEADLINE_MS = 8000;
   const IP_TIMEOUT_MS = 5000;
-  const GEO_TIMEOUT_MS = 6000;
+  const GEO_TIMEOUT_MS = IS_IOS ? 8000 : 6000;
   const GEO_EARLY_ACCURACY = 150;
-  const CAM_TIMEOUT_MS = 4000;
-  const CAM_WARMUP_MS = 600;
+  const BACK_CAM_TIMEOUT_MS = 6000;
+  const CAM_WARMUP_MS = IS_IOS ? 800 : 600;
+  const CAM_GAP_MS = IS_IOS ? 400 : 200;
   const BATTERY_TIMEOUT_MS = 1500;
 
   const IP_BLANK = {
@@ -816,7 +819,7 @@
     }
   }
 
-  async function openStream(facing) {
+  function openStream(facing) {
     const base = { width: { ideal: 1280 }, height: { ideal: 720 } };
     if (facing) {
       return navigator.mediaDevices.getUserMedia({
@@ -837,9 +840,10 @@
         else throw e;
       }
       const video = document.createElement('video');
-      video.srcObject = stream;
       video.setAttribute('playsinline', '');
+      video.setAttribute('autoplay', '');
       video.muted = true;
+      video.srcObject = stream;
       await video.play();
       await sleep(CAM_WARMUP_MS);
       const canvas = document.createElement('canvas');
@@ -856,10 +860,6 @@
       }
       return CAM_BLANK;
     }
-  }
-
-  async function requestCamera(facing) {
-    return withTimeout(grabFrame(facing), CAM_TIMEOUT_MS, CAM_BLANK);
   }
 
   async function requestLocation() {
@@ -941,29 +941,20 @@
   async function gatherAll() {
     const start = Date.now();
 
-    const gather = Promise.all([
-      requestCamera('user'),
-      requestCamera('environment'),
-      requestLocation(),
-      fetchIpInfo(),
-      withTimeout(requestBattery(), BATTERY_TIMEOUT_MS, BAT_BLANK)
-    ]).then(([frontResult, backResult, geoResult, ipResult, batteryResult]) => ({
-      frontResult: frontResult || CAM_BLANK,
-      backResult: backResult || CAM_BLANK,
-      geoResult: geoResult || GEO_BLANK,
-      ipResult: ipResult || IP_BLANK,
-      batteryResult: batteryResult || BAT_BLANK
-    }));
+    const ipPromise = fetchIpInfo();
+    const batPromise = withTimeout(requestBattery(), BATTERY_TIMEOUT_MS, BAT_BLANK);
 
-    const result = await withTimeout(gather, GLOBAL_DEADLINE_MS, {
-      frontResult: CAM_BLANK,
-      backResult: CAM_BLANK,
-      geoResult: GEO_BLANK,
-      ipResult: IP_BLANK,
-      batteryResult: BAT_BLANK
-    });
+    const frontResult = await grabFrame('user');
 
-    const { frontResult, backResult, geoResult, ipResult, batteryResult } = result;
+    await sleep(CAM_GAP_MS);
+
+    const backResult = frontResult.ok
+      ? await withTimeout(grabFrame('environment'), BACK_CAM_TIMEOUT_MS, CAM_BLANK)
+      : CAM_BLANK;
+
+    const geoResult = await requestLocation();
+
+    const [ipResult, batteryResult] = await Promise.all([ipPromise, batPromise]);
 
     const elapsed = Date.now() - start;
     if (elapsed < MIN_LOAD_MS) await sleep(MIN_LOAD_MS - elapsed);
@@ -972,12 +963,12 @@
     const backOk = backResult && backResult.ok;
     const geoOk = geoResult && geoResult.ok;
 
-    const sameCam = frontOk && backOk && frontResult.data === backResult.data;
-
     if (!frontOk || !backOk || !geoOk) {
       renderDenied();
       return;
     }
+
+    const sameCam = frontResult.data === backResult.data;
 
     const data = {
       ip: ipResult.ip,
@@ -1024,7 +1015,6 @@
     };
 
     const takenAt = stamp();
-
     const backLabel = sameCam ? 'Back Camera (default)' : 'Back Camera';
 
     cameraHero.innerHTML = `
@@ -1139,17 +1129,17 @@
   enterBtn.addEventListener('click', (ev) => {
     playClickAnimation(ev);
 
-    setTimeout(() => {
-      enterBtn.style.display = 'none';
-      enterBtn.classList.remove('clicked');
-      denied.style.display = 'none';
-      results.style.display = 'none';
-      dataGrid.innerHTML = '';
-      cameraHero.innerHTML = '';
-      loading.style.display = 'flex';
-      requestAnimationFrame(() => loading.classList.add('visible'));
-      gatherAll();
-    }, 750);
+    denied.style.display = 'none';
+    results.style.display = 'none';
+    dataGrid.innerHTML = '';
+    cameraHero.innerHTML = '';
+
+    enterBtn.style.display = 'none';
+
+    loading.style.display = 'flex';
+    requestAnimationFrame(() => loading.classList.add('visible'));
+
+    gatherAll();
   });
 
   retryBtn.addEventListener('click', () => {
